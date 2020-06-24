@@ -5,10 +5,10 @@
 from setuptools import setup, find_packages
 
 __authors__ = "Jordan Ovrè, Paul Duncan"
-__copyright__ = "Copyright (c) Jordan Ovrè / Paul Duncan"
-__license__ = "GPLv3"
-__version__ = "1.0.0"
-__contact__ = "Jordan Ovrè / Ghecko <ghecko78@gmail.com>, Paul Duncan / Eresse <eresse@dooba.io>"
+__copyright__ = "Copyright (c) ImmunIT - Jordan Ovrè / Paul Duncan"
+__license__ = "Apache 2.0"
+__version__ = "1.0.1"
+__contact__ = "Jordan Ovrè / Ghecko <jovre@immunit.ch>, Paul Duncan / Eresse <pduncan@immunit.ch>"
 
 description = 'Write the AVR eeprom memory'
 name = 'owfmodules.avrisp.eeprom_write'
