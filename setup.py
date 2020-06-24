@@ -27,7 +27,7 @@ setup(
         'tqdm>=4.45.0'
     ],
     classifiers=[
-        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python :: 3',
         'Development Status :: 5 - Production/Stable'
     ],
