@@ -21,7 +21,7 @@ setup(
     description=description,
     author=__authors__,
     zip_safe=True,
-    url='https://bitbucket.org/octowire/' + name,
+    url='https://github.com/immunIT/' + name,
     install_requires=[
         'hexformat>=0.2',
         'tqdm>=4.45.0'
