@@ -43,6 +43,12 @@ class EepromWrite(AModule):
             "verify": {"Value": "", "Required": False, "Type": "bool",
                        "Description": "Verify the firmware after the write process", "Default": False},
         }
+        self.advanced_options.update({
+            "start_address": {"Value": "0x00", "Required": False, "Type": "hex",
+                              "Description": "For raw binary only. The starting address\nto write the firmware. "
+                                             "Hex format (0x1FC00).",
+                              "Default": 0},
+        })
         self.dependencies.append("owfmodules.avrisp.device_id>=1.0.0")
 
     def get_device_id(self, spi_bus, reset_line, spi_baudrate):
@@ -86,40 +92,67 @@ class EepromWrite(AModule):
         self.logger.handle("Eeprom memory successfully erased.", self.logger.SUCCESS)
         return True
 
-    def verify(self, spi_interface, eeprom_size, firmware):
+    def verify(self, spi_interface, chunk_size, start_address, chunk):
         read_cmd = b'\xA0'
         dump = BytesIO()
+        extended_addr = None
 
-        # Read eeprom loop
-        for read_addr in tqdm(range(0, eeprom_size), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
-                              bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Bytes "
-                                         "[elapsed: {elapsed} left: {remaining}]"):
-            # Read byte
-            spi_interface.transmit(read_cmd + struct.pack(">H", read_addr))
+        # Read flash loop
+        for word_index in tqdm(range(0, chunk_size // 2), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
+                               bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Words "
+                                          "[elapsed: {elapsed} left: {remaining}]"):
+            address = word_index + (start_address // 2)
+            # Load extended address
+            if address >> 16 != extended_addr:
+                extended_addr = address >> 16
+                spi_interface.transmit(load_extended_addr + bytes([extended_addr]) + b'\x00')
+            # Read low byte
+            spi_interface.transmit(low_byte_read + struct.pack(">H", address & 0xFFFF))
+            dump.write(spi_interface.receive(1))
+            # Read high byte
+            spi_interface.transmit(high_byte_read + struct.pack(">H", address & 0xFFFF))
             dump.write(spi_interface.receive(1))
 
+        # Start verification
         self.logger.handle("Verifying...", self.logger.INFO)
-        for index, byte in enumerate(firmware):
+        for index, byte in enumerate(chunk):
             if byte != dump.getvalue()[index]:
                 self.logger.handle("verification error, first mismatch at byte 0x{:04x}"
                                    "\n\t\t0x{:04x} != 0x{:04x}".format(index, byte, dump.getvalue()[index]),
                                    self.logger.ERROR)
-                break
+                dump.close()
+                return False
         else:
-            self.logger.handle("{} bytes of eeprom successfully verified".format(len(firmware)), self.logger.SUCCESS)
-        dump.close()
+            self.logger.handle("{} bytes of flash successfully verified".format(len(chunk)), self.logger.SUCCESS)
+            dump.close()
+            return True
 
-    def loading_firmware(self, firmware_file):
-        try:
-            with open(firmware_file, 'r') as file:
-                ihex_firmware = hexformat.intelhex.IntelHex.fromihexfh(file)
-                self.logger.handle("IntelHex format detected..", self.logger.INFO)
-                firmware = ihex_firmware.get(address=0x00, size=ihex_firmware.usedsize())
-        except (UnicodeDecodeError, hexformat.base.DecodeError, ValueError):
-            self.logger.handle("Raw binary format detected..", self.logger.INFO)
-            with open(firmware_file, 'rb') as file:
-                firmware = bytearray(file.read())
-        return firmware
+    def verify(self, spi_interface, chunk_size, start_address, chunk):
+        read_cmd = b'\xA0'
+        dump = BytesIO()
+        address = start_address
+
+        # Read eeprom loop
+        for _ in tqdm(range(0, chunk_size), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
+                      bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Bytes "
+                                 "[elapsed: {elapsed} left: {remaining}]"):
+            # Read byte
+            spi_interface.transmit(read_cmd + struct.pack(">H", address))
+            dump.write(spi_interface.receive(1))
+            address = address + 1
+
+        self.logger.handle("Verifying...", self.logger.INFO)
+        for index, byte in enumerate(chunk):
+            if byte != dump.getvalue()[index]:
+                self.logger.handle("verification error, first mismatch at byte 0x{:04x}"
+                                   "\n\t\t0x{:04x} != 0x{:04x}".format(index, byte, dump.getvalue()[index]),
+                                   self.logger.ERROR)
+                dump.close()
+                return False
+        else:
+            self.logger.handle("{} bytes of eeprom successfully verified".format(len(chunk)), self.logger.SUCCESS)
+            dump.close()
+            return True
 
     @staticmethod
     def wait_poll_eeprom(spi_interface, byte, byte_addr):
@@ -138,10 +171,12 @@ class EepromWrite(AModule):
             if time.time() > timeout:
                 return False
 
-    def program_eeprom(self, spi_interface, reset, device, firmware):
+    def program_eeprom(self, spi_interface, reset, chunk, address, chunk_nb=None, chunks=None):
         write_cmd = b'\xC0'
         enable_mem_access_cmd = b'\xac\x53\x00\x00'
         verify = self.options["verify"]["Value"]
+        start_address = address
+        hex_address = "0x{:04x}".format(start_address)
 
         # Drive reset low
         reset.status = 0
@@ -150,22 +185,34 @@ class EepromWrite(AModule):
         spi_interface.transmit(enable_mem_access_cmd)
         time.sleep(0.5)
 
-        for addr in tqdm(range(0, len(firmware), 1), desc="Program", ascii=" #", unit_scale=True,
-                         bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} bytes "
-                                    "[elapsed: {elapsed} left: {remaining}]"):
+        if chunk_nb is not None and chunks is not None:
+            self.logger.handle(f"Writing chunk {chunk_nb}/{chunks} (start address: {hex_address})", self.logger.INFO)
+        else:
+            self.logger.handle(f"Writing firmware (start address: {hex_address})", self.logger.INFO)
+
+        for index in tqdm(range(0, len(chunk), 1), desc="Program", ascii=" #", unit_scale=True,
+                          bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} bytes "
+                                     "[elapsed: {elapsed} left: {remaining}]"):
             # Send write cmd
-            spi_interface.transmit(write_cmd + struct.pack(">H", addr) + bytes([firmware[addr]]))
+            spi_interface.transmit(write_cmd + struct.pack(">H", address) + bytes([chunk[index]]))
             # Wait until byte write on the eeprom
-            if not self.wait_poll_eeprom(spi_interface, firmware[addr], addr):
-                self.logger.handle("\nWriting at byte address '{}' take too much time, exiting..".format(addr),
+            if not self.wait_poll_eeprom(spi_interface, chunk[index], address):
+                self.logger.handle("\nWriting at byte address '{}' take too much time, exiting..".format(address),
                                    self.logger.ERROR)
                 return
+            # Increment the Eeprom address
+            address = address + 1
 
-        self.logger.handle("Successfully write {} byte(s) to eeprom memory.".format(len(firmware)), self.logger.SUCCESS)
+        self.logger.handle("Successfully write {} byte(s) to eeprom memory.".format(len(chunk)), self.logger.SUCCESS)
 
         if verify:
-            self.logger.handle("Start verifying eeprom memory against {}".format(self.options["firmware"]["Value"]))
-            self.verify(spi_interface, int(device["eeprom_size"], 16), firmware)
+            hex_address = "0x{:04x}".format(start_address)
+            if chunk_nb is not None and chunks is not None:
+                self.logger.handle(f"Start verifying chunk {chunk_nb}/{chunks} (start address: {hex_address})")
+            else:
+                self.logger.handle(f"Start verifying eeprom memory against {self.options['firmware']['Value']} "
+                                   f"(start address: {hex_address})")
+            self.verify(spi_interface, len(chunk), start_address, chunk)
 
         # Drive reset high
         reset.status = 1
@@ -191,17 +238,30 @@ class EepromWrite(AModule):
         reset.status = 1
 
         # Erase the target chip
-        if not self.erase(spi_interface, reset, device):
-            return 
+        if self.options["erase"]["Value"]:
+            if not self.erase(spi_interface, reset, device):
+                return
 
-        # Loading firmware
-        firmware = self.loading_firmware(self.options["firmware"]["Value"])
-        if len(firmware) > int(device["eeprom_size"], 16):
-            self.logger.handle("The firmware size is larger than the eeprom size, exiting..", self.logger.ERROR)
-            return
-
-        # Program the device eeprom
-        self.program_eeprom(spi_interface, reset, device, firmware)
+        # Loading the firmware and call the write function with the needed arguments,
+        # depending the firmware format (raw or ihex)
+        try:
+            with open(self.options["firmware"]["Value"], 'r') as file:
+                ihex_firmware = hexformat.intelhex.IntelHex.fromihexfh(file)
+                self.logger.handle("IntelHex format detected..", self.logger.INFO)
+                # Program the device
+                chunks = len(ihex_firmware.parts())
+                chunk_nb = 1
+                # For each parts in the ihex file, write it to the correct address in the flash memory.
+                for ihex_part in ihex_firmware.parts():
+                    chunk_addr, chunk_len = ihex_part
+                    chunk = ihex_firmware.get(address=chunk_addr, size=chunk_len)
+                    self.program_eeprom(spi_interface, reset, chunk, chunk_addr, chunk_nb, chunks)
+                    chunk_nb = chunk_nb + 1
+        except (UnicodeDecodeError, hexformat.base.DecodeError, ValueError):
+            self.logger.handle("Raw binary format detected..", self.logger.INFO)
+            with open(self.options["firmware"]["Value"], 'rb') as file:
+                firmware = bytearray(file.read())
+                self.program_eeprom(spi_interface, reset, firmware, self.advanced_options["start_address"]["Value"])
 
     def run(self):
         """
