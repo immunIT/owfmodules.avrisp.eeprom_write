@@ -95,41 +95,6 @@ class EepromWrite(AModule):
     def verify(self, spi_interface, chunk_size, start_address, chunk):
         read_cmd = b'\xA0'
         dump = BytesIO()
-        extended_addr = None
-
-        # Read flash loop
-        for word_index in tqdm(range(0, chunk_size // 2), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
-                               bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Words "
-                                          "[elapsed: {elapsed} left: {remaining}]"):
-            address = word_index + (start_address // 2)
-            # Load extended address
-            if address >> 16 != extended_addr:
-                extended_addr = address >> 16
-                spi_interface.transmit(load_extended_addr + bytes([extended_addr]) + b'\x00')
-            # Read low byte
-            spi_interface.transmit(low_byte_read + struct.pack(">H", address & 0xFFFF))
-            dump.write(spi_interface.receive(1))
-            # Read high byte
-            spi_interface.transmit(high_byte_read + struct.pack(">H", address & 0xFFFF))
-            dump.write(spi_interface.receive(1))
-
-        # Start verification
-        self.logger.handle("Verifying...", self.logger.INFO)
-        for index, byte in enumerate(chunk):
-            if byte != dump.getvalue()[index]:
-                self.logger.handle("verification error, first mismatch at byte 0x{:04x}"
-                                   "\n\t\t0x{:04x} != 0x{:04x}".format(index, byte, dump.getvalue()[index]),
-                                   self.logger.ERROR)
-                dump.close()
-                return False
-        else:
-            self.logger.handle("{} bytes of flash successfully verified".format(len(chunk)), self.logger.SUCCESS)
-            dump.close()
-            return True
-
-    def verify(self, spi_interface, chunk_size, start_address, chunk):
-        read_cmd = b'\xA0'
-        dump = BytesIO()
         address = start_address
 
         # Read eeprom loop
