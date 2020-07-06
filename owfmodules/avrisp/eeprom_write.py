@@ -23,14 +23,14 @@ class EepromWrite(AModule):
     def __init__(self, owf_config):
         super(EepromWrite, self).__init__(owf_config)
         self.meta.update({
-            'name': 'AVR write eeprom memory',
+            'name': 'AVR EEPROM memory write',
             'version': '1.0.0',
-            'description': 'Module to write the eeprom memory of an AVR device using the ISP protocol.',
+            'description': 'Write the EEPROM memory of AVR microcontrollers',
             'author': 'Jordan Ovrè / Ghecko <jovre@immunit.ch>, Paul Duncan / Eresse <pduncan@immunit.ch>'
         })
         self.options = {
             "spi_bus": {"Value": "", "Required": True, "Type": "int",
-                        "Description": "The octowire SPI bus (0=SPI0 or 1=SPI1)", "Default": 0},
+                        "Description": "SPI bus (0=SPI0 or 1=SPI1)", "Default": 0},
             "reset_line": {"Value": "", "Required": True, "Type": "int",
                            "Description": "The octowire GPIO used as the Reset line", "Default": 0},
             "spi_baudrate": {"Value": "", "Required": True, "Type": "int",
@@ -67,8 +67,8 @@ class EepromWrite(AModule):
 
         # Drive reset low
         reset.status = 0
+        self.logger.handle("Enabling Memory Access...", self.logger.INFO)
 
-        self.logger.handle("Enable Memory Access...", self.logger.INFO)
         # Drive reset low
         reset.status = 0
         # Enable Memory Access
@@ -76,20 +76,20 @@ class EepromWrite(AModule):
         time.sleep(0.5)
 
         # Fill the eeprom with 0xFF
-        self.logger.handle("Erasing the eeprom memory (Write 0xFF)...", self.logger.INFO)
-        for addr in tqdm(range(0, int(device["eeprom_size"], 16), 1), desc="Erase", ascii=" #", unit_scale=True,
+        self.logger.handle("Erasing the EEPROM memory (Write 0xFF)...", self.logger.INFO)
+        for addr in tqdm(range(0, int(device["eeprom_size"], 16), 1), desc="Erasing", ascii=" #", unit_scale=True,
                          bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} bytes "
                                     "[elapsed: {elapsed} left: {remaining}]"):
             spi_interface.transmit(write_cmd + struct.pack(">H", addr) + b'\xFF')
             # Wait until byte write on the eeprom
             if not self.wait_poll_eeprom(spi_interface, 0xFF, addr):
-                self.logger.handle("\nWriting at byte address '{}' take too much time, exiting..".format(addr),
+                self.logger.handle("\nWriting at byte address '{}' took too long, exiting..".format(addr),
                                    self.logger.ERROR)
                 return False
 
         # Drive reset high
         reset.status = 1
-        self.logger.handle("Eeprom memory successfully erased.", self.logger.SUCCESS)
+        self.logger.handle("EEPROM memory successfully erased.", self.logger.SUCCESS)
         return True
 
     def verify(self, spi_interface, chunk_size, start_address, chunk):
@@ -98,7 +98,7 @@ class EepromWrite(AModule):
         address = start_address
 
         # Read eeprom loop
-        for _ in tqdm(range(0, chunk_size), desc="Read", unit_divisor=1024, ascii=" #", unit_scale=True,
+        for _ in tqdm(range(0, chunk_size), desc="Reading", unit_divisor=1024, ascii=" #", unit_scale=True,
                       bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} Bytes "
                                  "[elapsed: {elapsed} left: {remaining}]"):
             # Read byte
@@ -115,7 +115,7 @@ class EepromWrite(AModule):
                 dump.close()
                 return False
         else:
-            self.logger.handle("{} bytes of eeprom successfully verified".format(len(chunk)), self.logger.SUCCESS)
+            self.logger.handle("{} bytes of EEPROM successfully verified".format(len(chunk)), self.logger.SUCCESS)
             dump.close()
             return True
 
@@ -146,7 +146,7 @@ class EepromWrite(AModule):
         # Drive reset low
         reset.status = 0
         # Enable Memory Access
-        self.logger.handle("Enable Memory Access...", self.logger.INFO)
+        self.logger.handle("Enabling Memory Access...", self.logger.INFO)
         spi_interface.transmit(enable_mem_access_cmd)
         time.sleep(0.5)
 
@@ -155,27 +155,27 @@ class EepromWrite(AModule):
         else:
             self.logger.handle(f"Writing firmware (start address: {hex_address})", self.logger.INFO)
 
-        for index in tqdm(range(0, len(chunk), 1), desc="Program", ascii=" #", unit_scale=True,
+        for index in tqdm(range(0, len(chunk), 1), desc="Programming", ascii=" #", unit_scale=True,
                           bar_format="{desc} : {percentage:3.0f}%[{bar}] {n_fmt}/{total_fmt} bytes "
                                      "[elapsed: {elapsed} left: {remaining}]"):
             # Send write cmd
             spi_interface.transmit(write_cmd + struct.pack(">H", address) + bytes([chunk[index]]))
             # Wait until byte write on the eeprom
             if not self.wait_poll_eeprom(spi_interface, chunk[index], address):
-                self.logger.handle("\nWriting at byte address '{}' take too much time, exiting..".format(address),
+                self.logger.handle("\nWriting at byte address '{}' took too long, exiting..".format(address),
                                    self.logger.ERROR)
                 return
             # Increment the Eeprom address
             address = address + 1
 
-        self.logger.handle("Successfully write {} byte(s) to eeprom memory.".format(len(chunk)), self.logger.SUCCESS)
+        self.logger.handle("Successfully wrote {} byte(s) to EEPROM memory.".format(len(chunk)), self.logger.SUCCESS)
 
         if verify:
             hex_address = "0x{:04x}".format(start_address)
             if chunk_nb is not None and chunks is not None:
-                self.logger.handle(f"Start verifying chunk {chunk_nb}/{chunks} (start address: {hex_address})")
+                self.logger.handle(f"Starting chunk verification {chunk_nb}/{chunks} (start address: {hex_address})")
             else:
-                self.logger.handle(f"Start verifying eeprom memory against {self.options['firmware']['Value']} "
+                self.logger.handle(f"Starting EEPROM memory verification against {self.options['firmware']['Value']} "
                                    f"(start address: {hex_address})")
             self.verify(spi_interface, len(chunk), start_address, chunk)
 
@@ -199,7 +199,7 @@ class EepromWrite(AModule):
         # Configure GPIO as output
         reset.direction = GPIO.OUTPUT
 
-        # Active Reset is low
+        # Reset is active-low
         reset.status = 1
 
         # Erase the target chip
@@ -207,7 +207,7 @@ class EepromWrite(AModule):
             if not self.erase(spi_interface, reset, device):
                 return
 
-        # Loading the firmware and call the write function with the needed arguments,
+        # Load the firmware and call the write function with the needed arguments,
         # depending the firmware format (raw or ihex)
         try:
             with open(self.options["firmware"]["Value"], 'r') as file:
@@ -216,7 +216,7 @@ class EepromWrite(AModule):
                 # Program the device
                 chunks = len(ihex_firmware.parts())
                 chunk_nb = 1
-                # For each parts in the ihex file, write it to the correct address in the flash memory.
+                # For every part in the ihex file, write it to the correct address in the flash memory.
                 for ihex_part in ihex_firmware.parts():
                     chunk_addr, chunk_len = ihex_part
                     chunk = ihex_firmware.get(address=chunk_addr, size=chunk_len)
@@ -231,11 +231,11 @@ class EepromWrite(AModule):
     def run(self):
         """
         Main function.
-        Write the eeprom memory of an AVR device.
+        Write the EEPROM memory of AVR microcontrollers.
         :return: Nothing.
         """
-        # If detect_octowire is True then Detect and connect to the Octowire hardware. Else, connect to the Octowire
-        # using the parameters that were configured. It sets the self.owf_serial variable if the hardware is found.
+        # If detect_octowire is True then detect and connect to the Octowire hardware. Else, connect to the Octowire
+        # using the parameters that were configured. This sets the self.owf_serial variable if the hardware is found.
         self.connect()
         if not self.owf_serial:
             return
