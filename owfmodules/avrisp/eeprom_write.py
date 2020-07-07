@@ -24,7 +24,7 @@ class EepromWrite(AModule):
         super(EepromWrite, self).__init__(owf_config)
         self.meta.update({
             'name': 'AVR EEPROM memory write',
-            'version': '1.0.0',
+            'version': '1.0.1',
             'description': 'Write the EEPROM memory of AVR microcontrollers',
             'author': 'Jordan Ovrè / Ghecko <jovre@immunit.ch>, Paul Duncan / Eresse <pduncan@immunit.ch>'
         })
